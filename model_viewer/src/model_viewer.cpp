@@ -75,9 +75,9 @@ std::string getEnvVar(const std::string &name)
 // Returns the absolute path to the shader directory
 std::string shaderDir(void)
 {
-    std::string rootDir = getEnvVar("ASSIGNMENT3_ROOT");
+    std::string rootDir = getEnvVar("PARTICLESYSTEM_ROOT");
     if (rootDir.empty()) {
-        std::cout << "Error: ASSIGNMENT3_ROOT is not set." << std::endl;
+        std::cout << "Error: PARTICLESYSTEM_ROOT is not set." << std::endl;
         std::exit(EXIT_FAILURE);
     }
     return rootDir + "/model_viewer/src/shaders/";
@@ -86,9 +86,9 @@ std::string shaderDir(void)
 // Returns the absolute path to the 3D model directory
 std::string modelDir(void)
 {
-    std::string rootDir = getEnvVar("ASSIGNMENT3_ROOT");
+    std::string rootDir = getEnvVar("PARTICLESYSTEM_ROOT");
     if (rootDir.empty()) {
-        std::cout << "Error: ASSIGNMENT3_ROOT is not set." << std::endl;
+        std::cout << "Error: PARTICLESYSTEM_ROOT is not set." << std::endl;
         std::exit(EXIT_FAILURE);
     }
     return rootDir + "/model_viewer/3d_models/";
@@ -97,9 +97,9 @@ std::string modelDir(void)
 // Returns the absolute path to the cubemap texture directory
 std::string cubemapDir(void)
 {
-    std::string rootDir = getEnvVar("ASSIGNMENT3_ROOT");
+    std::string rootDir = getEnvVar("PARTICLESYSTEM_ROOT");
     if (rootDir.empty()) {
-        std::cout << "Error: ASSIGNMENT3_ROOT is not set." << std::endl;
+        std::cout << "Error: PARTICLESYSTEM_ROOT is not set." << std::endl;
         std::exit(EXIT_FAILURE);
     }
     return rootDir + "/model_viewer/cubemaps/";

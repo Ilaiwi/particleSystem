@@ -24,7 +24,7 @@
 // The attribute locations we will use in the vertex shader
 enum AttributeLocation {
     POSITION = 0,
-    NORMAL = 1
+    COLOR = 1
 };
 
 // Struct for representing an indexed triangle mesh
@@ -40,6 +40,7 @@ struct MeshVAO {
     GLuint billboard_vertex_buffer;
     GLuint particles_position_buffer;
     GLuint particles_color_buffer;
+    GLuint vao;
 };
 
 struct Particle{
@@ -73,7 +74,7 @@ struct Context {
     GLuint cubemap;
     Particle ParticlesContainer[MaxParticles];
     int LastUsedParticle = 0;
-    float elapsed_time;
+    float delta;
 };
 
 static const GLfloat g_vertex_buffer_data[] = { 
@@ -166,7 +167,51 @@ void loadMesh(const std::string &filename, Mesh *mesh)
 void createMeshVAO(Context &ctx)
 {
     // Generates and populates a VBO for the vertices
+    glGenBuffers(1, &ctx.meshVAO.billboard_vertex_buffer);
+    glBindBuffer(GL_ARRAY_BUFFER, ctx.meshVAO.billboard_vertex_buffer);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(g_vertex_buffer_data), g_vertex_buffer_data, GL_STATIC_DRAW);
+
+    // The VBO containing the positions and sizes of the particles
+    glGenBuffers(1, &ctx.meshVAO.particles_position_buffer);
+    glBindBuffer(GL_ARRAY_BUFFER, ctx.meshVAO.particles_position_buffer);
+    // Initialize with empty (NULL) buffer : it will be updated later, each frame.
+    glBufferData(GL_ARRAY_BUFFER, MaxParticles * 4 * sizeof(GLfloat), NULL, GL_STREAM_DRAW);
+
+    // The VBO containing the colors of the particles
+    glGenBuffers(1, &ctx.meshVAO.particles_color_buffer);
+    glBindBuffer(GL_ARRAY_BUFFER, ctx.meshVAO.particles_color_buffer);
+    // Initialize with empty (NULL) buffer : it will be updated later, each frame.
+    glBufferData(GL_ARRAY_BUFFER, MaxParticles * 4 * sizeof(GLubyte), NULL, GL_STREAM_DRAW);
     
+    glGenVertexArrays(1, &(ctx.meshVAO.vao));
+    glBindVertexArray(ctx.meshVAO.vao);
+    glBindBuffer(GL_ARRAY_BUFFER, ctx.meshVAO.billboard_vertex_buffer);
+
+    glEnableVertexAttribArray(POSITION);
+    glBindBuffer(GL_ARRAY_BUFFER, ctx.meshVAO.particles_position_buffer);
+    glVertexAttribPointer(
+            POSITION,                                // attribute. No particular reason for 1, but must match the layout in the shader.
+            4,                                // size : x + y + z + size => 4
+            GL_FLOAT,                         // type
+            GL_FALSE,                         // normalized?
+            0,                                // stride
+            (void*)0                          // array buffer offset
+    );
+
+    glEnableVertexAttribArray(COLOR);
+        glBindBuffer(GL_ARRAY_BUFFER, ctx.meshVAO.particles_color_buffer);
+        glVertexAttribPointer(
+            COLOR,                                // attribute. No particular reason for 1, but must match the layout in the shader.
+            4,                                // size : r + g + b + a => 4
+            GL_UNSIGNED_BYTE,                 // type
+            GL_TRUE,                          // normalized?    *** YES, this means that the unsigned char[4] will be accessible with a vec4 (floats) in the shader ***
+            0,                                // stride
+            (void*)0                          // array buffer offset
+    );
+
+    glBindVertexArray(ctx.defaultVAO); 
+
+
 }
 
 void initializeTrackball(Context &ctx)
@@ -183,7 +228,7 @@ void init(Context &ctx)
                                     shaderDir() + "particle.frag");
 
     // loadMesh((modelDir() + "gargo.obj"), &ctx.mesh);
-    // createMeshVAO(ctx, ctx.mesh, &ctx.meshVAO);
+    createMeshVAO(ctx);
 
     // Load cubemap texture(s)
     // ...
@@ -196,18 +241,108 @@ void drawMesh(Context &ctx, GLuint program, const MeshVAO &meshVAO)
 {
     // Define uniforms
     glm::mat4 model = trackballGetRotationMatrix(ctx.trackball);
-    glm::mat4 view = glm::mat4();
-    glm::mat4 projection = glm::ortho(-ctx.aspect, ctx.aspect, -1.0f, 1.0f, -1.0f, 1.0f);
+    glm::mat4 view = glm::lookAt(glm::vec3(0.0, 1.0, 4.0), glm::vec3(0.0, 0.0, -1.0), glm::vec3(0.0, 1.0, 0.0));
+    glm::mat4 projection = glm::perspective(1.0f, 1.0f , 0.1f, 8.0f);
     glm::mat4 mv = view * model;
     glm::mat4 mvp = projection * mv;
     // ...
-
+    glm::vec3 CameraPosition(glm::inverse(view)[3]);
     static GLfloat* g_particule_position_size_data = new GLfloat[MaxParticles * 4];
     static GLubyte* g_particule_color_data         = new GLubyte[MaxParticles * 4];
     for(int i=0; i<MaxParticles; i++){
         ctx.ParticlesContainer[i].life = -1.0f;
         ctx.ParticlesContainer[i].cameradistance = -1.0f;
     }
+
+        // Generate 10 new particule each millisecond,
+        // but limit this to 16 ms (60 fps), or if you have 1 long frame (1sec),
+        // newparticles will be huge and the next frame even longer.
+        int newparticles = (int)(ctx.delta*10000.0);
+        if (newparticles > (int)(0.016f*10000.0))
+            newparticles = (int)(0.016f*10000.0);
+        
+        for(int i=0; i<newparticles; i++){
+            int particleIndex = FindUnusedParticle(ctx);
+            ctx.ParticlesContainer[particleIndex].life = 5.0f; // This particle will live 5 seconds.
+            ctx.ParticlesContainer[particleIndex].pos = glm::vec3(0,0,-20.0f);
+
+            float spread = 1.5f;
+            glm::vec3 maindir = glm::vec3(0.0f, 10.0f, 0.0f);
+            // Very bad way to generate a random direction; 
+            // See for instance http://stackoverflow.com/questions/5408276/python-uniform-spherical-distribution instead,
+            // combined with some user-controlled parameters (main direction, spread, etc)
+            glm::vec3 randomdir = glm::vec3(
+                (rand()%2000 - 1000.0f)/1000.0f,
+                (rand()%2000 - 1000.0f)/1000.0f,
+                (rand()%2000 - 1000.0f)/1000.0f
+            );
+            
+            ctx.ParticlesContainer[particleIndex].speed = maindir + randomdir*spread;
+
+
+            // Very bad way to generate a random color
+            ctx.ParticlesContainer[particleIndex].r = rand() % 256;
+            ctx.ParticlesContainer[particleIndex].g = rand() % 256;
+            ctx.ParticlesContainer[particleIndex].b = rand() % 256;
+            ctx.ParticlesContainer[particleIndex].a = (rand() % 256) / 3;
+            ctx.ParticlesContainer[particleIndex].size = (rand()%1000)/2000.0f + 0.1f;
+            
+        }
+
+        // Simulate all particles
+        int ParticlesCount = 0;
+        for(int i=0; i<MaxParticles; i++){
+
+            Particle& p = ctx.ParticlesContainer[i]; // shortcut
+
+            if(p.life > 0.0f){
+
+                // Decrease life
+                p.life -= ctx.delta;
+                if (p.life > 0.0f){
+
+                    // Simulate simple physics : gravity only, no collisions
+                    p.speed += glm::vec3(0.0f,-9.81f, 0.0f) * (float)ctx.delta * 0.5f;
+                    p.pos += p.speed * (float)ctx.delta;
+                    p.cameradistance = glm::length2( p.pos - CameraPosition );
+                    //ParticlesContainer[i].pos += glm::vec3(0.0f,10.0f, 0.0f) * (float)ctx.delta;
+
+                    // Fill the GPU buffer
+                    g_particule_position_size_data[4*ParticlesCount+0] = p.pos.x;
+                    g_particule_position_size_data[4*ParticlesCount+1] = p.pos.y;
+                    g_particule_position_size_data[4*ParticlesCount+2] = p.pos.z;
+                                                   
+                    g_particule_position_size_data[4*ParticlesCount+3] = p.size;
+                                                   
+                    g_particule_color_data[4*ParticlesCount+0] = p.r;
+                    g_particule_color_data[4*ParticlesCount+1] = p.g;
+                    g_particule_color_data[4*ParticlesCount+2] = p.b;
+                    g_particule_color_data[4*ParticlesCount+3] = p.a;
+
+                }else{
+                    // Particles that just died will be put at the end of the buffer in SortParticles();
+                    p.cameradistance = -1.0f;
+                }
+
+                ParticlesCount++;
+
+            }
+        }
+
+        SortParticles(ctx);
+
+        glBindBuffer(GL_ARRAY_BUFFER, ctx.meshVAO.particles_position_buffer);
+        glBufferData(GL_ARRAY_BUFFER, MaxParticles * 4 * sizeof(GLfloat), NULL, GL_STREAM_DRAW); // Buffer orphaning, a common way to improve streaming perf. See above link for details.
+        glBufferSubData(GL_ARRAY_BUFFER, 0, ParticlesCount * sizeof(GLfloat) * 4, g_particule_position_size_data);
+
+        glBindBuffer(GL_ARRAY_BUFFER, ctx.meshVAO.particles_color_buffer);
+        glBufferData(GL_ARRAY_BUFFER, MaxParticles * 4 * sizeof(GLubyte), NULL, GL_STREAM_DRAW); // Buffer orphaning, a common way to improve streaming perf. See above link for details.
+        glBufferSubData(GL_ARRAY_BUFFER, 0, ParticlesCount * sizeof(GLubyte) * 4, g_particule_color_data);
+
+
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
 
     // Activate program
     glUseProgram(program);
@@ -218,12 +353,12 @@ void drawMesh(Context &ctx, GLuint program, const MeshVAO &meshVAO)
     // Pass uniforms
     glUniformMatrix4fv(glGetUniformLocation(program, "u_mv"), 1, GL_FALSE, &mv[0][0]);
     glUniformMatrix4fv(glGetUniformLocation(program, "u_mvp"), 1, GL_FALSE, &mvp[0][0]);
-    glUniform1f(glGetUniformLocation(program, "u_time"), ctx.elapsed_time);
+    glUniform1f(glGetUniformLocation(program, "u_time"), ctx.delta);
     // ...
 
     // Draw!
     glBindVertexArray(meshVAO.vao);
-    glDrawElements(GL_TRIANGLES, meshVAO.numIndices, GL_UNSIGNED_INT, 0);
+    glDrawArraysInstancedARB(GL_TRIANGLE_STRIP, 0, 4, ParticlesCount);
     glBindVertexArray(ctx.defaultVAO);
 }
 
@@ -377,10 +512,13 @@ int main(void)
     glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
     init(ctx);
 
+    float lastTime = glfwGetTime();
     // Start rendering loop
     while (!glfwWindowShouldClose(ctx.window)) {
         glfwPollEvents();
-        ctx.elapsed_time = glfwGetTime();
+        float currentTime = glfwGetTime();
+        ctx.delta = currentTime - lastTime;
+        lastTime = currentTime;
         display(ctx);
 #ifdef WITH_TWEAKBAR
         TwDraw();

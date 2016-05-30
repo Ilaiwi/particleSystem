@@ -45,6 +45,23 @@ struct MeshVAO {
     int numIndices;
 };
 
+struct Particle{
+    glm::vec3 pos, speed;
+    unsigned char r,g,b,a; // Color
+    float size, angle, weight;
+    float life; // Remaining life of the particle. if <0 : dead and unused.
+    float cameradistance; // *Squared* distance to the camera. if dead : -1.0f
+
+    bool operator<(const Particle& that) const {
+        // Sort in reverse order : far particles drawn first.
+        return this->cameradistance > that.cameradistance;
+    }
+};
+
+
+const int MaxParticles = 100000;
+int LastUsedParticle = 0;
+
 // Struct for resources and state
 struct Context {
     int width;
@@ -57,8 +74,43 @@ struct Context {
     MeshVAO meshVAO;
     GLuint defaultVAO;
     GLuint cubemap;
+    Particle ParticlesContainer[MaxParticles];
+    int LastUsedParticle = 0;
     float elapsed_time;
 };
+
+static const GLfloat g_vertex_buffer_data[] = { 
+         -0.5f, -0.5f, 0.0f,
+          0.5f, -0.5f, 0.0f,
+         -0.5f,  0.5f, 0.0f,
+          0.5f,  0.5f, 0.0f,
+    };
+
+// Finds a Particle in ParticlesContainer which isn't used yet.
+// (i.e. life < 0);
+int FindUnusedParticle(Context &ctx){
+
+    for(int i=ctx.LastUsedParticle; i<MaxParticles; i++){
+        if (ctx.ParticlesContainer[i].life < 0){
+            LastUsedParticle = i;
+            return i;
+        }
+    }
+
+    for(int i=0; i<ctx.LastUsedParticle; i++){
+        if (ctx.ParticlesContainer[i].life < 0){
+            ctx.LastUsedParticle = i;
+            return i;
+        }
+    }
+
+    return 0; // All particles are taken, override the first one
+}
+
+void SortParticles(Context &ctx){
+    std::sort(&ctx.ParticlesContainer[0], &ctx.ParticlesContainer[MaxParticles]);
+}
+
 
 // Returns the value of an environment variable
 std::string getEnvVar(const std::string &name)
@@ -161,11 +213,11 @@ void initializeTrackball(Context &ctx)
 
 void init(Context &ctx)
 {
-    ctx.program = loadShaderProgram(shaderDir() + "mesh.vert",
-                                    shaderDir() + "mesh.frag");
+    ctx.program = loadShaderProgram(shaderDir() + "particle.vert",
+                                    shaderDir() + "particle.frag");
 
-    loadMesh((modelDir() + "gargo.obj"), &ctx.mesh);
-    createMeshVAO(ctx, ctx.mesh, &ctx.meshVAO);
+    // loadMesh((modelDir() + "gargo.obj"), &ctx.mesh);
+    // createMeshVAO(ctx, ctx.mesh, &ctx.meshVAO);
 
     // Load cubemap texture(s)
     // ...
@@ -184,6 +236,12 @@ void drawMesh(Context &ctx, GLuint program, const MeshVAO &meshVAO)
     glm::mat4 mvp = projection * mv;
     // ...
 
+    static GLfloat* g_particule_position_size_data = new GLfloat[MaxParticles * 4];
+    static GLubyte* g_particule_color_data         = new GLubyte[MaxParticles * 4];
+    for(int i=0; i<MaxParticles; i++){
+        ctx.ParticlesContainer[i].life = -1.0f;
+        ctx.ParticlesContainer[i].cameradistance = -1.0f;
+    }
     // Activate program
     glUseProgram(program);
 
@@ -208,6 +266,7 @@ void display(Context &ctx)
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     glEnable(GL_DEPTH_TEST); // ensures that polygons overlap correctly
+    glDepthFunc(GL_LESS);
     drawMesh(ctx, ctx.program, ctx.meshVAO);
 }
 
@@ -316,10 +375,10 @@ int main(void)
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
-    ctx.width = 500;
-    ctx.height = 500;
+    ctx.width = 800;
+    ctx.height = 800;
     ctx.aspect = float(ctx.width) / float(ctx.height);
-    ctx.window = glfwCreateWindow(ctx.width, ctx.height, "Model viewer", nullptr, nullptr);
+    ctx.window = glfwCreateWindow(ctx.width, ctx.height, "Particle System", nullptr, nullptr);
     glfwMakeContextCurrent(ctx.window);
     glfwSetWindowUserPointer(ctx.window, &ctx);
     glfwSetKeyCallback(ctx.window, keyCallback);
